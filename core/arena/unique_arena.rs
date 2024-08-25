@@ -36,6 +36,16 @@ struct ArenaBoxData<T> {
   data: T,
 }
 
+impl<T> ArenaBoxData<T> {
+  /// Offset the `this` ptr to point to the `data` field
+  /// Safety: This uses ptr::add to do the offset, see that
+  /// method for the precise contract.
+  pub unsafe fn data(this: NonNull<Self>) -> NonNull<T> {
+    // basically `&raw (*this).data`
+    ptr_byte_add(this, memoffset::offset_of!(ArenaBoxData<T>, data))
+  }
+}
+
 impl<T: 'static> ArenaBox<T> {
   /// Offset of the `ptr` field within the `ArenaBox` struct.
   const PTR_OFFSET: usize = memoffset::offset_of!(ArenaBox<T>, ptr);
@@ -88,6 +98,13 @@ impl<T> ArenaBox<T> {
   #[inline(always)]
   fn data(&self) -> &ArenaBoxData<T> {
     unsafe { self.ptr.as_ref() }
+  }
+
+  #[inline(always)]
+  pub(crate) fn deref_ptr(&self) -> NonNull<T> {
+    // Safety: Safe for the same reasons `data()` is safe,
+    // but this does not create a reference to the ArenaBoxData<T> or its data
+    unsafe { ArenaBoxData::data(self.ptr) }
   }
 
   #[inline(always)]

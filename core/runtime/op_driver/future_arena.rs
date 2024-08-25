@@ -28,6 +28,16 @@ struct DynFutureInfoErased<T, C> {
   data: TypeErased<MAX_ARENA_FUTURE_SIZE>,
 }
 
+impl<T, C> DynFutureInfoErased<T, C> {
+  pub fn get_arena_boxed_ptr(
+    arena_box: &ArenaBox<Self>,
+  ) -> MaybeUninit<NonNull<dyn ContextFuture<T, C>>> {
+    // SAFETY: The pointer returned by `deref_ptr()` safe to read because `deref()`
+    //  (which returns the same pointer but constraints the provenance) is safe.
+    unsafe { (*arena_box.deref_ptr().as_ptr()).ptr }
+  }
+}
+
 pub trait ContextFuture<T, C>: Future<Output = T> {
   fn context(&self) -> C;
 }
@@ -85,7 +95,10 @@ impl<T, C> FutureAllocation<T, C> {
   pub fn context(&self) -> C {
     unsafe {
       match self {
-        Self::Arena(a) => (a.ptr.assume_init().as_ref()).context(),
+        Self::Arena(a) => (DynFutureInfoErased::get_arena_boxed_ptr(a)
+          .assume_init()
+          .as_ref())
+        .context(),
         Self::Box(b) => b.context(),
       }
     }
@@ -102,9 +115,12 @@ impl<T, C> Future for FutureAllocation<T, C> {
     // SAFETY: We know the underlying futures are both pinned by their allocations
     unsafe {
       match self.get_mut() {
-        Self::Arena(a) => {
-          Pin::new_unchecked(a.ptr.assume_init().as_mut()).poll(cx)
-        }
+        Self::Arena(a) => Pin::new_unchecked(
+          DynFutureInfoErased::get_arena_boxed_ptr(a)
+            .assume_init()
+            .as_mut(),
+        )
+        .poll(cx),
         Self::Box(b) => b.as_mut().poll(cx),
       }
     }
